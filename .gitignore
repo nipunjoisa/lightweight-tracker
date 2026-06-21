@@ -1,0 +1,26 @@
+# Build artifacts
+/build/
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/Makefile
+
+# Binaries
+/tracker
+*.o
+*.obj
+*.exe
+
+# Dependency and intermediate files
+*.d
+
+# Output videos and logs
+/outputs/
+*.log
+
+# IDE/editor
+.vscode/
+.idea/
+
+# macOS
+.DS_Store

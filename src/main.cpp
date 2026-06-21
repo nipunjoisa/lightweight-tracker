@@ -1,0 +1,70 @@
+#include "TrackerEngine.hpp"
+#include "TemplateMatcher.hpp"
+#include "MosseMatcher.hpp"
+#include "VideoSource.hpp"
+#include <cstdio>
+#include <cstdlib>
+#include <memory>
+#include <string>
+
+using namespace cot;
+
+static void usage(const char* prog) {
+    std::printf("cpu-object-tracker  (C++17 / OpenCV, CPU-only)\n");
+    std::printf("usage:\n");
+    std::printf("  %s <video_path> [options]\n", prog);
+    std::printf("  %s --camera <index> [options]\n", prog);
+    std::printf("options:\n");
+    std::printf("  --camera <i>      use camera index i instead of a file\n");
+    std::printf("  --matcher <name>  appearance model: mosse (default) | ncc\n");
+    std::printf("  --learn <f>       online learn rate (default 0.05; MOSSE likes ~0.125)\n");
+    std::printf("  --anchor <f>      MOSSE pull-back toward frame-1 filter (default 0.02)\n");
+    std::printf("  --prior <f>       motion-prior width (lower = tighter to predicted path; 0 = off)\n");
+    std::printf("  --no-adapt        freeze the template (diagnostic: isolates drift)\n");
+    std::printf("  --output <path>   output video (default outputs/videos/tracked.mp4)\n");
+    std::printf("  --no-display      run headless (still writes the output video)\n");
+    std::printf("  -h, --help        show this help\n");
+}
+
+int main(int argc, char** argv) {
+    if (argc < 2) { usage(argv[0]); return 1; }
+
+    TrackerConfig cfg;
+    std::string videoPath;
+    std::string matcherName = "mosse";
+    double mosseAnchor = 0.02;
+    double mossePrior  = 1.0;
+    int cameraIndex = -1;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        if (a == "--camera" && i + 1 < argc)       cameraIndex = std::atoi(argv[++i]);
+        else if (a == "--matcher" && i + 1 < argc) matcherName = argv[++i];
+        else if (a == "--learn" && i + 1 < argc)   cfg.templateLearnRate = (float)std::atof(argv[++i]);
+        else if (a == "--anchor" && i + 1 < argc)  mosseAnchor = std::atof(argv[++i]);
+        else if (a == "--prior" && i + 1 < argc)   mossePrior = std::atof(argv[++i]);
+        else if (a == "--no-adapt")                cfg.adapt = false;
+        else if (a == "--output" && i + 1 < argc)  cfg.outputPath = argv[++i];
+        else if (a == "--no-display")              cfg.display = false;
+        else if (a == "-h" || a == "--help")     { usage(argv[0]); return 0; }
+        else if (a.rfind("--", 0) != 0)            videoPath = a;
+        else std::fprintf(stderr, "unknown option: %s\n", a.c_str());
+    }
+
+    VideoSource source;
+    bool ok = (cameraIndex >= 0) ? source.openCamera(cameraIndex)
+                                 : source.openFile(videoPath);
+    if (!ok || !source.isOpened()) {
+        std::fprintf(stderr, "error: could not open %s\n",
+                     cameraIndex >= 0 ? "camera" : videoPath.c_str());
+        return 2;
+    }
+
+    std::unique_ptr<IMatcher> matcher;
+    if (matcherName == "ncc") matcher = std::make_unique<TemplateMatcher>();
+    else                      matcher = std::make_unique<MosseMatcher>(2.0, 8, mosseAnchor, mossePrior);
+    std::printf("matcher: %s\n", (matcherName == "ncc") ? "ncc" : "mosse");
+
+    TrackerEngine engine(cfg, std::move(matcher));
+    return engine.run(source) ? 0 : 3;
+}
