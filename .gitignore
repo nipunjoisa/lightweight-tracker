@@ -1,35 +1,26 @@
-# Build artifacts
-/build/
-/CMakeFiles/
-/CMakeCache.txt
-/cmake_install.cmake
-/Makefile
+# Large folders
+data/
+outputs/
 
-# Binaries
-/tracker
-*.o
-*.obj
-*.exe
+# Build files
+build/
+cmake-build-debug/
+cmake-build-release/
 
-# Dependency and intermediate files
-*.d
+# VSCode
+.vscode/
 
-# Output videos and logs
-/outputs/
+# Mac
+.DS_Store
+
+# Logs
 *.log
 
-# Ignore data and outputs content (keep directories with .gitkeep)
-/data/*
-!/data/.gitkeep
-/data/samples/*
-!/data/samples/.gitkeep
-/outputs/*
-!/outputs/.gitkeep
-!/outputs/videos/.gitkeep
-
-# IDE/editor
-.vscode/
-.idea/
-
-# macOS
-.DS_Store
+# Binaries
+*.exe
+*.out
+*.o
+*.obj
+*.a
+*.so
+*.dll
