@@ -18,6 +18,15 @@
 /outputs/
 *.log
 
+# Ignore data and outputs content (keep directories with .gitkeep)
+/data/*
+!/data/.gitkeep
+/data/samples/*
+!/data/samples/.gitkeep
+/outputs/*
+!/outputs/.gitkeep
+!/outputs/videos/.gitkeep
+
 # IDE/editor
 .vscode/
 .idea/
