@@ -18,8 +18,8 @@ static void usage(const char* prog) {
     std::printf("  --camera <i>      use camera index i instead of a file\n");
     std::printf("  --matcher <name>  appearance model: mosse (default) | ncc\n");
     std::printf("  --learn <f>       online learn rate (default 0.05; MOSSE likes ~0.125)\n");
-    std::printf("  --anchor <f>      MOSSE pull-back toward frame-1 filter (default 0.02)\n");
-    std::printf("  --prior <f>       motion-prior width (lower = tighter to predicted path; 0 = off)\n");
+    std::printf("  --anchor <f>      MOSSE pull-back toward frame-1 filter (default 0 = off)\n");
+    std::printf("  --prior <f>       velocity-oriented motion prior (default 0 = off)\n");
     std::printf("  --no-adapt        freeze the template (diagnostic: isolates drift)\n");
     std::printf("  --output <path>   output video (default outputs/videos/tracked.mp4)\n");
     std::printf("  --no-display      run headless (still writes the output video)\n");
@@ -32,8 +32,8 @@ int main(int argc, char** argv) {
     TrackerConfig cfg;
     std::string videoPath;
     std::string matcherName = "mosse";
-    double mosseAnchor = 0.02;
-    double mossePrior  = 1.0;
+    double mosseAnchor = 0.0;   // off by default (plain MOSSE was best)
+    double mossePrior  = 0.0;   // off by default
     int cameraIndex = -1;
 
     for (int i = 1; i < argc; ++i) {

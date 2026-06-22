@@ -83,27 +83,6 @@ void MosseMatcher::setTemplate(const cv::Mat& frame, const cv::Rect& box) {
 
     cv::createHanningWindow(win_, fsize_, CV_32F);
 
-    // Motion prior: a Gaussian over the response centered at zero-shift (the
-    // Kalman-predicted location). Multiplying the response by this biases peak
-    // selection toward the predicted path, so a persistent off-center pull
-    // (smoke trail below the missile, an off-path bike) can't slowly drag the
-    // lock away. priorFrac_ <= 0 disables it.
-    if (priorFrac_ > 0.0) {
-        prior_ = cv::Mat(fsize_, CV_32F);
-        double sig = priorFrac_ * 0.5 * std::min(fsize_.width, fsize_.height);
-        double ps2 = 2.0 * sig * sig + 1e-6;
-        float pcx = fsize_.width * 0.5f, pcy = fsize_.height * 0.5f;
-        for (int y = 0; y < fsize_.height; ++y) {
-            float* pp = prior_.ptr<float>(y);
-            for (int x = 0; x < fsize_.width; ++x) {
-                float dx = x - pcx, dy = y - pcy;
-                pp[x] = static_cast<float>(std::exp(-(dx * dx + dy * dy) / ps2));
-            }
-        }
-    } else {
-        prior_.release();
-    }
-
     // Desired correlation output: a Gaussian peak at the window center.
     cv::Mat g(fsize_, CV_32F);
     float gx = fsize_.width * 0.5f, gy = fsize_.height * 0.5f;
@@ -135,6 +114,49 @@ void MosseMatcher::setTemplate(const cv::Mat& frame, const cv::Rect& box) {
     H1_0_ = H1_.clone();
     H2_0_ = H2_.clone();
     updateKernel();
+}
+
+// Velocity-oriented motion prior over the response, centered at zero-shift (the
+// predicted position). It is a forward-leaning teardrop: generous along the
+// velocity, tight across it, and collapsed in the BACKWARD half-plane where a
+// wake/trail lives. So an off-center pull behind the target (a missile's smoke)
+// is structurally suppressed regardless of how well it correlates. With little
+// motion it degrades to a symmetric Gaussian. priorFrac_ <= 0 disables it.
+void MosseMatcher::buildPrior(const cv::Point2f& v) {
+    if (priorFrac_ <= 0.0) { prior_.release(); return; }
+    const int w = fsize_.width, h = fsize_.height;
+    prior_.create(fsize_, CV_32F);
+
+    const double s0      = priorFrac_ * 0.5 * std::min(w, h);
+    const double sigPar  = std::max(2.0, s0);          // along-track (generous)
+    const double sigPerp = std::max(2.0, s0 * 0.6);    // cross-track (tight)
+    const double tau     = std::max(1.0, s0 * 0.4);    // backward decay length
+    const float  cx = w * 0.5f, cy = h * 0.5f;
+
+    const double speed = std::sqrt((double)v.x * v.x + (double)v.y * v.y);
+    const bool oriented = speed > 1.5;                 // px/frame
+    const double ux = oriented ? v.x / speed : 0.0;
+    const double uy = oriented ? v.y / speed : 0.0;
+
+    for (int y = 0; y < h; ++y) {
+        float* pp = prior_.ptr<float>(y);
+        for (int x = 0; x < w; ++x) {
+            double dx = x - cx, dy = y - cy;
+            double wgt;
+            if (!oriented) {
+                wgt = std::exp(-(dx * dx + dy * dy) / (2.0 * s0 * s0 + 1e-6));
+            } else {
+                double a  = dx * ux + dy * uy;             // along-track (signed)
+                double px = dx - a * ux, py = dy - a * uy;  // cross-track vector
+                double c2 = px * px + py * py;
+                double wAlong = std::exp(-(a * a) / (2.0 * sigPar * sigPar));
+                double wCross = std::exp(-c2 / (2.0 * sigPerp * sigPerp));
+                double back   = (a >= 0.0) ? 1.0 : std::exp(a / tau);  // suppress behind v
+                wgt = wAlong * wCross * back;
+            }
+            pp[x] = static_cast<float>(wgt);
+        }
+    }
 }
 
 void MosseMatcher::useOriginalTemplate() {
@@ -208,6 +230,8 @@ MatchResult MosseMatcher::match(const cv::Mat& frame,
     cv::Mat gray = toGray(frame);
     cv::Rect roi = searchRegion & cv::Rect(0, 0, gray.cols, gray.rows);
     if (roi.width < 4 || roi.height < 4) return out;
+
+    buildPrior(velocity_);  // orient the prior along the predicted velocity
 
     // Candidate eval centers. While locked the ROI is ~2x the box -> a single
     // center (the prediction) with a full scale sweep. Once the ROI is widened

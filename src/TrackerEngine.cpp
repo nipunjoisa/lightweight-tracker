@@ -70,6 +70,7 @@ bool TrackerEngine::run(VideoSource& source) {
 
         // 1) Predict where the target should be.
         cv::Rect2f predicted = kalman_.predict();
+        matcher_->setMotionHint(kalman_.velocity());  // orient the motion prior
 
         // 2) Build the local search ROI (widened if we've been lost).
         cv::Rect roiRect = search_.compute(predicted, expansion, frame.size());

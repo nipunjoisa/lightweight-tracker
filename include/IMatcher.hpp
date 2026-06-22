@@ -21,6 +21,10 @@ public:
     // Restore the working template to the pristine original (called on loss).
     virtual void useOriginalTemplate() = 0;
 
+    // Optional per-frame motion context (predicted velocity, px/frame). Backends
+    // that use a motion prior orient it with this; others ignore it.
+    virtual void setMotionHint(const cv::Point2f& velocity) { (void)velocity; }
+
     // Search inside searchRegion (full-frame rect), trying scales around expectedSize.
     // Returned box is in FULL-FRAME coordinates.
     virtual MatchResult match(const cv::Mat& frame,

@@ -5,7 +5,7 @@ namespace cot {
 KalmanBoxTracker::KalmanBoxTracker() {
     kf_.init(6, 4, 0, CV_32F);
 
-    // x' = A x : center advances by its velocity (dt = 1 frame); w,h held.
+    // Constant-velocity model on the center; size held steady frame-to-frame.
     kf_.transitionMatrix = (cv::Mat_<float>(6, 6) <<
         1, 0, 1, 0, 0, 0,
         0, 1, 0, 1, 0, 0,
@@ -14,7 +14,7 @@ KalmanBoxTracker::KalmanBoxTracker() {
         0, 0, 0, 0, 1, 0,
         0, 0, 0, 0, 0, 1);
 
-    // z = H x : we measure [cx, cy, w, h] (no direct velocity measurement).
+    // Measurement observes [cx, cy, w, h].
     kf_.measurementMatrix = (cv::Mat_<float>(4, 6) <<
         1, 0, 0, 0, 0, 0,
         0, 1, 0, 0, 0, 0,
@@ -54,6 +54,11 @@ cv::Rect2f KalmanBoxTracker::correct(const cv::Rect2f& meas) {
 cv::Rect2f KalmanBoxTracker::stateBox() const {
     const cv::Mat& s = kf_.statePost;
     return toBox(s.at<float>(0), s.at<float>(1), s.at<float>(4), s.at<float>(5));
+}
+
+cv::Point2f KalmanBoxTracker::velocity() const {
+    const cv::Mat& s = kf_.statePost;
+    return cv::Point2f(s.at<float>(2), s.at<float>(3));
 }
 
 } // namespace cot
