@@ -22,6 +22,7 @@ add_executable(tracker
   src/KalmanBoxTracker.cpp
   src/TemplateMatcher.cpp
   src/MosseMatcher.cpp
+  src/CvTrackerMatcher.cpp
   src/SearchRegion.cpp
   src/ConfidenceEvaluator.cpp
   src/ReacquisitionManager.cpp

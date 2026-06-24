@@ -74,6 +74,8 @@ struct TrackerConfig {
     // IO
     bool        display    = true;
     std::string outputPath = "outputs/videos/tracked.mp4";
+    cv::Rect    initRoi{};         // preset target box (skips manual selection)
+    bool        hasInitRoi = false;
 };
 
 } // namespace cot

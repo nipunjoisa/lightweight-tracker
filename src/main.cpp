@@ -1,6 +1,7 @@
 #include "TrackerEngine.hpp"
 #include "TemplateMatcher.hpp"
 #include "MosseMatcher.hpp"
+#include "CvTrackerMatcher.hpp"
 #include "VideoSource.hpp"
 #include <cstdio>
 #include <cstdlib>
@@ -16,7 +17,8 @@ static void usage(const char* prog) {
     std::printf("  %s --camera <index> [options]\n", prog);
     std::printf("options:\n");
     std::printf("  --camera <i>      use camera index i instead of a file\n");
-    std::printf("  --matcher <name>  appearance model: mosse (default) | ncc\n");
+    std::printf("  --matcher <name>  appearance model: mosse (default) | csrt | kcf | ncc\n");
+    std::printf("  --roi x,y,w,h     preset target box (skip manual selection; for fair A/B)\n");
     std::printf("  --learn <f>       online learn rate (default 0.05; MOSSE likes ~0.125)\n");
     std::printf("  --anchor <f>      MOSSE pull-back toward frame-1 filter (default 0 = off)\n");
     std::printf("  --prior <f>       velocity-oriented motion prior (default 0 = off)\n");
@@ -43,6 +45,15 @@ int main(int argc, char** argv) {
         else if (a == "--learn" && i + 1 < argc)   cfg.templateLearnRate = (float)std::atof(argv[++i]);
         else if (a == "--anchor" && i + 1 < argc)  mosseAnchor = std::atof(argv[++i]);
         else if (a == "--prior" && i + 1 < argc)   mossePrior = std::atof(argv[++i]);
+        else if (a == "--roi" && i + 1 < argc) {
+            int x, y, w, h;
+            if (std::sscanf(argv[++i], "%d,%d,%d,%d", &x, &y, &w, &h) == 4) {
+                cfg.initRoi = cv::Rect(x, y, w, h);
+                cfg.hasInitRoi = true;
+            } else {
+                std::fprintf(stderr, "bad --roi (expected x,y,w,h)\n");
+            }
+        }
         else if (a == "--no-adapt")                cfg.adapt = false;
         else if (a == "--output" && i + 1 < argc)  cfg.outputPath = argv[++i];
         else if (a == "--no-display")              cfg.display = false;
@@ -61,9 +72,11 @@ int main(int argc, char** argv) {
     }
 
     std::unique_ptr<IMatcher> matcher;
-    if (matcherName == "ncc") matcher = std::make_unique<TemplateMatcher>();
-    else                      matcher = std::make_unique<MosseMatcher>(2.0, 8, mosseAnchor, mossePrior);
-    std::printf("matcher: %s\n", (matcherName == "ncc") ? "ncc" : "mosse");
+    if (matcherName == "ncc")       matcher = std::make_unique<TemplateMatcher>();
+    else if (matcherName == "csrt") matcher = std::make_unique<CvTrackerMatcher>(CvTrackerMatcher::Kind::CSRT);
+    else if (matcherName == "kcf")  matcher = std::make_unique<CvTrackerMatcher>(CvTrackerMatcher::Kind::KCF);
+    else                            matcher = std::make_unique<MosseMatcher>(2.0, 8, mosseAnchor, mossePrior);
+    std::printf("matcher: %s\n", matcherName.c_str());
 
     TrackerEngine engine(cfg, std::move(matcher));
     return engine.run(source) ? 0 : 3;

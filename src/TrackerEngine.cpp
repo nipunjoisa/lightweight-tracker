@@ -27,13 +27,21 @@ bool TrackerEngine::initializeTarget(VideoSource& source, cv::Mat& firstFrame, c
         std::fprintf(stderr, "[engine] could not read first frame\n");
         return false;
     }
-    const char* win = "Select target  |  drag a box, ENTER/SPACE to confirm, c to cancel";
-    roi = cv::selectROI(win, firstFrame, /*showCrosshair=*/false, /*fromCenter=*/false);
-    cv::destroyWindow(win);
+    cv::Rect bounds(0, 0, firstFrame.cols, firstFrame.rows);
+    if (cfg_.hasInitRoi) {
+        roi = cfg_.initRoi & bounds;          // preset box -> identical init across runs
+    } else {
+        const char* win = "Select target  |  drag a box, ENTER/SPACE to confirm, c to cancel";
+        roi = cv::selectROI(win, firstFrame, /*showCrosshair=*/false, /*fromCenter=*/false);
+        cv::destroyWindow(win);
+    }
     if (roi.width < 4 || roi.height < 4) {
-        std::fprintf(stderr, "[engine] invalid/empty ROI selected\n");
+        std::fprintf(stderr, "[engine] invalid/empty ROI\n");
         return false;
     }
+    // Print so the same box can be reused across matchers for a fair comparison.
+    std::printf("init roi: %d,%d,%d,%d  (reuse with --roi %d,%d,%d,%d)\n",
+                roi.x, roi.y, roi.width, roi.height, roi.x, roi.y, roi.width, roi.height);
     return true;
 }
 
