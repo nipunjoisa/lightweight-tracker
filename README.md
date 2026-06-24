@@ -1,93 +1,186 @@
-# cpu-object-tracker
+# lightweight-tracker
 
-CPU-only C++17 aerial object tracker: Kalman prediction + local ROI template
-matching + confidence-aware updates + reacquisition. No GPU, no deep learning.
+CPU-only C++17 aerial object tracker. No GPU, no deep learning, no external model weights.
 
-The tracker detects/initializes **once** (you draw the box), then tracks cheaply
-inside a small search window using prediction and correlation matching.
+You draw a box on frame 1. The tracker holds lock using Kalman prediction, a pluggable correlation matcher, and a confidence-gated state machine that governs when to update the appearance model and when to widen the search.
 
-## Pipeline
+---
+
+## Where things stand
+
+**v1** — NCC template matcher, 4-state machine, reacquisition, metrics, video out. Works but drifts on fast maneuvers.
+
+**v2 (current)** — MOSSE adaptive correlation filter as the default backend. CSRT and KCF wired in via OpenCV behind the same `IMatcher` interface. Benchmarked against all three on real aerial footage; MOSSE wins the fast-small-target regime. The one unsolved case is a 90° turn plus smoke occlusion — that defeated every backend and every tuning combination tried.
+
+**v3 (next)** — ground-truth IoU / center-error metrics, per-tracker benchmark table, `tracker.yaml` config parsing (the struct is already in place, just not wired to the file).
+
+---
+
+## Architecture
 
 ```
-predict (Kalman) -> build search ROI -> multi-scale NCC match -> confidence (PSR)
-   -> gate (speed/size) -> branch:
-        strong  : correct Kalman + slow template update      [TRACKING]
-        weak    : correct Kalman, freeze template             [UNCERTAIN]
-        low     : prediction only, widen ROI, pristine tmpl   [LOST / REACQUIRING]
+VideoSource
+    |
+    v
+TrackerEngine (main loop)
+    |
+    +-- KalmanBoxTracker   predict / correct
+    +-- SearchRegion       build the ROI for this frame
+    +-- IMatcher           pluggable appearance model
+    |       MosseMatcher       (MOSSE adaptive filter, default)
+    |       CvTrackerMatcher   (CSRT or KCF via cv::Tracker)
+    |       TemplateMatcher    (NCC, v1 baseline)
+    +-- ConfidenceEvaluator    fuse NCC + PSR -> [0,1] score
+    +-- ReacquisitionManager   widen ROI, restore pristine template
+    |
+    v
+Visualizer + TrackerMetrics
 ```
 
-State vector `[cx, cy, vx, vy, w, h]`, measurement `[cx, cy, w, h]`.
-Confidence = `nccWeight * clamp(NCC) + psrWeight * clamp(PSR / psrSaturation)`.
-Thresholds: strong `>= 0.70`, weak `0.45..0.70`, lost `< 0.45`.
+State machine: **TRACKING → UNCERTAIN → LOST → REACQUIRING → TRACKING**
 
-## Build (macOS)
+Confidence thresholds: strong `≥ 0.70` (update model), weak `0.45–0.70` (freeze model), lost `< 0.45` (widen search, restore template).
+
+Kalman state vector: `[cx, cy, vx, vy, w, h]`. Measurement: `[cx, cy, w, h]`.
+
+---
+
+## Build
+
+Requires: CMake ≥ 3.16, a C++17 compiler, OpenCV 4.x.
 
 ```bash
-# 1. Toolchain + OpenCV
+# macOS
 brew install cmake opencv
 
-# 2. Configure + build
-cd cpu-object-tracker
+# configure + build
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 
-# binary: build/tracker
+# binary is at build/tracker
 ```
 
-If `find_package(OpenCV)` fails, point CMake at the install:
+If `find_package(OpenCV)` fails on Apple Silicon:
 
 ```bash
 cmake -S . -B build -DOpenCV_DIR=$(brew --prefix opencv)/lib/cmake/opencv4
 ```
 
+---
+
 ## Run
 
 ```bash
-# track in a video file
-./build/tracker data/sample_videos/clip.mp4
+# MOSSE (default) — manual ROI selection on frame 1
+./build/tracker data/trial1.MP4
+
+# preset the ROI to skip the selection dialog (useful for fair A/B)
+./build/tracker data/trial1.MP4 --matcher mosse --roi 812,140,46,58
+
+# compare all three backends on the same clip with the same box
+./build/tracker data/trial1.MP4 --matcher mosse --roi 812,140,46,58 --output outputs/videos/mosse.mp4
+./build/tracker data/trial1.MP4 --matcher csrt  --roi 812,140,46,58 --output outputs/videos/csrt.mp4
+./build/tracker data/trial1.MP4 --matcher kcf   --roi 812,140,46,58 --output outputs/videos/kcf.mp4
+
+# NCC baseline (v1 matcher, slowest to drift but weakest on fast targets)
+./build/tracker data/trial1.MP4 --matcher ncc
 
 # webcam
 ./build/tracker --camera 0
 
-# custom output, headless
-./build/tracker data/trial3.mp4 --output outputs/videos/run1.mp4 --no-display
+# headless (no GUI window, still writes video)
+./build/tracker data/trial1.MP4 --no-display --output outputs/videos/run.mp4
 ```
 
-A window opens on the first frame: drag a box around the target, press ENTER or
-SPACE to confirm. Then tracking runs. Press `q` or ESC to stop early. Metrics
-print to the terminal at the end; the annotated video is written to `--output`.
+On frame 1, drag a box around the target, then press **Enter** or **Space** to confirm. Press `q` or **Esc** to stop early. Metrics print to the terminal at the end.
 
-## VS Code
+---
 
-Install the **C/C++** and **CMake Tools** extensions. Open the folder, pick a
-kit when prompted, then use the CMake Tools status-bar buttons (Configure /
-Build / Run), or just build from the integrated terminal with the commands
-above. Pass the video path as a launch argument in `.vscode/launch.json` if you
-want to debug.
+## CLI reference
 
-## Roadmap
+| Flag | Default | Notes |
+|---|---|---|
+| `--matcher <name>` | `mosse` | `mosse` · `csrt` · `kcf` · `ncc` |
+| `--roi x,y,w,h` | (manual) | Preset box; required for fair backend comparisons |
+| `--learn <f>` | `0.05` | Template learn rate. MOSSE works best around `0.125` |
+| `--anchor <f>` | `0` | MOSSE pull-back toward the frame-1 filter (0 = off) |
+| `--prior <f>` | `0` | Velocity-oriented motion prior width (0 = off) |
+| `--no-adapt` | — | Freeze the appearance model (diagnostic) |
+| `--output <path>` | `outputs/videos/tracked.mp4` | Annotated video path |
+| `--no-display` | — | Headless mode |
+| `--camera <i>` | — | Use webcam index `i` instead of a file |
 
-- v1 (this): full module architecture, NCC + PSR matching, multi-scale search,
-  4-state machine, dual-template reacquisition, metrics, video out. 
-## v1- has very weak outcome 
-- v2: MOSSE/KCF backend behind `IMatcher`, multi-template memory, `tracker.yaml`
-  parsing (config struct is already in place).
-## v2- current with MOSSE as backend .
-- v3: ground-truth IoU / center-error metrics, benchmark + compare-trackers.
+---
 
+## Matchers
 
+### MOSSE (`--matcher mosse`)
+Adaptive correlation filter (Bolme et al., 2010). The filter is learned in the Fourier domain and updated online — adapts to appearance change, handles slight orientation shifts. This is the current best backend. PSR is the native quality signal and feeds directly into the confidence evaluator.
 
-## v2-> ended up like this 
-      So here's where the project honestly stands. You have a from-scratch CPU MOSSE tracker with Kalman supervision, confidence-gated updates, and a reacquisition state machine, benchmarked against OpenCV's CSRT and KCF and beating both on real aerial footage, holding lock through a high-speed climb where the stock trackers fail within ~15 frames. That is a genuinely strong portfolio result, and the framing writes itself: low-compute beats heavyweight in the fast-small-target regime. The one characterized weakness is the 90° maneuver plus smoke trail — which defeated all three trackers and every predictor tweak I tried, so it's a hard problem, not a loose end you forgot.
+Key parameters:
+- `sigma` — width of the desired Gaussian response (default `2.0`)
+- `initWarps` — number of random affine warps used to bootstrap the filter (default `8`)
+- `anchor` — per-update pull-back toward the initial filter; helps against catastrophic drift but slows adaptation (default `0`, i.e. off)
+- `prior` — biases the response map in the direction of predicted motion (default `0`)
 
-this is v2-->
-## build it first 
-cmake --build build -j
+### CSRT (`--matcher csrt`)
+OpenCV's discriminative correlation filter with channel and spatial reliability. Heavier than MOSSE, generally more accurate on slow/large targets, loses lock faster on sudden small-target maneuvers in this footage.
 
-## for mosse 
-./build/tracker missile_clip.mp4 --matcher mosse
-# -> init roi: 812,140,46,58  (reuse with --roi 812,140,46,58)
+### KCF (`--matcher kcf`)
+Kernelized Correlation Filter. Faster than CSRT, similar accuracy profile in practice. Both CSRT and KCF are wrapped by `CvTrackerMatcher`, which adapts the `cv::Tracker` interface to `IMatcher`.
 
-## csrt and kcf 
-./build/tracker missile_clip.mp4 --matcher csrt --roi 812,140,46,58
-./build/tracker missile_clip.mp4 --matcher kcf  --roi 812,140,46,58
+### NCC (`--matcher ncc`)
+Normalized cross-correlation, the v1 baseline. Rigid template, no online update unless `adapt` is true. Good for sanity-checking the pipeline; loses lock earliest on real footage.
+
+---
+
+## Adding a new matcher
+
+1. Create `include/YourMatcher.hpp` and `src/YourMatcher.cpp`.
+2. Inherit from `IMatcher` and implement the five virtual methods (`setTemplate`, `updateTemplate`, `useOriginalTemplate`, `match`, `hasTemplate`). The `setMotionHint` override is optional.
+3. Add the `.cpp` to `CMakeLists.txt` under `add_executable(tracker ...)`.
+4. Wire it into `main.cpp` with an `else if (matcherName == "yours")` branch.
+
+Nothing else changes. The engine, state machine, confidence evaluator, and visualizer are all matcher-agnostic.
+
+---
+
+## What to look at next (v3 targets)
+
+- **Ground-truth metrics** — load a ground-truth `.txt` (MOT format) alongside the video and compute per-frame IoU and center error. The `TrackerMetrics` class already tracks frame count, lost-frame count, and runtime; extend it here.
+- **Benchmark table** — run all four matchers on all three clips in one script, collect the metrics, print a comparison table. Makes the portfolio result quantitative rather than just visual.
+- **`tracker.yaml` parsing** — `TrackerConfig` in [include/Types.hpp](include/Types.hpp) has every tunable field. Wire it to the YAML file at [configs/tracker.yaml](configs/tracker.yaml) using `cv::FileStorage` (already a dependency via OpenCV).
+- **Multi-template memory** — store the N best patches seen during TRACKING and fall back to them during reacquisition instead of always the pristine frame-1 crop.
+
+---
+
+## File map
+
+```
+include/
+  IMatcher.hpp          — matcher interface (the only contract the engine sees)
+  MosseMatcher.hpp      — MOSSE adaptive filter
+  CvTrackerMatcher.hpp  — CSRT / KCF wrapper
+  TemplateMatcher.hpp   — NCC baseline
+  KalmanBoxTracker.hpp  — Kalman predict / correct
+  SearchRegion.hpp      — ROI expansion logic
+  ConfidenceEvaluator.hpp
+  ReacquisitionManager.hpp
+  TrackerEngine.hpp
+  TrackerMetrics.hpp
+  Visualizer.hpp
+  VideoSource.hpp
+  Types.hpp             — TrackStatus, MatchResult, Evaluation, TrackState, TrackerConfig
+
+src/                    — implementations (mirror of include/)
+configs/tracker.yaml    — config file (fields defined, parsing not yet wired)
+data/                   — test clips (trial1–3.MP4)
+outputs/videos/         — written here by default
+CMakeLists.txt
+```
+
+---
+
+## License
+
+See [LICENSE](LICENSE).
