@@ -31,7 +31,7 @@ jobs:
         run: |
           ./build/tracker data/trial3.mp4 \
             --matcher mosse \
-            --roi 812,140,46,58 \
+            --roi 345,590,20,60 \
             --no-display \
             --output outputs/mosse_ci.mp4
 
