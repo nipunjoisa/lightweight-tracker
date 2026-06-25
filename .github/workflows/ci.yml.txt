@@ -1,0 +1,42 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ feature/log-polar-rotation, main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install OpenCV
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libopencv-dev \
+            cmake \
+            build-essential
+
+      - name: Build tracker
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(nproc)
+
+      - name: Run tracker on test clip (MOSSE)
+        run: |
+          ./build/tracker data/trial3.mp4 \
+            --matcher mosse \
+            --roi 812,140,46,58 \
+            --no-display \
+            --output outputs/mosse_ci.mp4
+
+      - name: Upload output video
+        uses: actions/upload-artifact@v4
+        with:
+          name: tracked-output
+          path: outputs/
