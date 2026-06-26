@@ -26,6 +26,12 @@ public:
                       const std::vector<float>& scales) override;
     bool hasTemplate() const override { return !H_.empty(); }
 
+    // Multi-target detection: return up to maxPeaks candidate locations by reading
+    // the correlation heat map across the region (one shared filter -> many peaks
+    // when several look-alike objects are present). Used by the multi-target track.
+    std::vector<MatchResult> detect(const cv::Mat& frame, const cv::Rect& region,
+                                    int maxPeaks, float psrFloor) const;
+
 private:
     static cv::Mat toGray(const cv::Mat& frame);
     static cv::Mat divSpectrums(const cv::Mat& A, const cv::Mat& B);  // complex A/B

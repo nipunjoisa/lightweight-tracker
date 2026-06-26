@@ -12,7 +12,7 @@ You draw a box on frame 1. The tracker holds lock using Kalman prediction, a plu
 
 **v2 (current)** — MOSSE adaptive correlation filter is now the default backend, with CSRT and KCF available through `CvTrackerMatcher` behind the same `IMatcher` interface. The tracker supports manual ROI, matcher selection, online appearance adaptation, confidence-gated updates, and annotated video output. MOSSE performs best on fast small targets; the hardest failure mode remains a 90° turn plus smoke occlusion.
 
-**v2.1 (implemented)** — the runtime is working on local macOS, the CLI supports `--matcher`, `--roi`, and video export, and the codebase includes a `tracker.yaml` schema in `include/Types.hpp` even though runtime YAML parsing is not yet wired in.
+**v2.1 (implemented)** — the runtime is working on local macOS; the CLI supports `--matcher`, `--roi`, `--multi`, and video export; and the codebase includes a `tracker.yaml` schema in `include/Types.hpp` even though runtime YAML parsing is not yet wired in. A new multi-target mode shares the MOSSE appearance filter across several motion-consistent Kalman tracks so look-alike objects retain separate identities.
 
 **v3 (next)** — add ground-truth IoU / center-error metrics, produce a per-tracker benchmark table, wire `tracker.yaml` config parsing, and consider multi-template memory for more robust reacquisition.
 
@@ -84,6 +84,9 @@ cmake -S . -B build -DOpenCV_DIR=$(brew --prefix opencv)/lib/cmake/opencv4
 ./build/tracker data/trial1.MP4 --matcher csrt  --roi 812,140,46,58 --output outputs/videos/csrt.mp4
 ./build/tracker data/trial1.MP4 --matcher kcf   --roi 812,140,46,58 --output outputs/videos/kcf.mp4
 
+# multi-target mode for look-alike objects
+./build/tracker data/trial1.MP4 --matcher mosse --multi --roi 812,140,46,58 --output outputs/videos/multi.mp4
+
 # NCC baseline (v1 matcher, slowest to drift but weakest on fast targets)
 ./build/tracker data/trial1.MP4 --matcher ncc
 
@@ -107,6 +110,8 @@ On frame 1, drag a box around the target, then press **Enter** or **Space** to c
 | `--learn <f>` | `0.05` | Template learn rate. MOSSE works best around `0.125` |
 | `--anchor <f>` | `0` | MOSSE pull-back toward the frame-1 filter (0 = off) |
 | `--prior <f>` | `0` | Velocity-oriented motion prior width (0 = off) |
+| `--no-rotation` | — | Disable MOSSE log-polar rotation recovery |
+| `--multi` | — | Multi-target mode: keep identities apart by motion |
 | `--no-adapt` | — | Freeze the appearance model (diagnostic) |
 | `--output <path>` | `outputs/videos/tracked.mp4` | Annotated video path |
 | `--no-display` | — | Headless mode |
@@ -173,6 +178,7 @@ include/
   Visualizer.hpp
   VideoSource.hpp
   Types.hpp             — TrackStatus, MatchResult, Evaluation, TrackState, TrackerConfig
+  MultiTargetTracker.hpp — multi-target motion-track manager
 
 src/                    — implementations (mirror of include/)
 configs/tracker.yaml    — config file (fields defined, parsing not yet wired)

@@ -330,4 +330,55 @@ MatchResult MosseMatcher::match(const cv::Mat& frame,
     return out;
 }
 
+std::vector<MatchResult> MosseMatcher::detect(const cv::Mat& frame,
+                                              const cv::Rect& region,
+                                              int maxPeaks, float psrFloor) const {
+    std::vector<MatchResult> out;
+    if (H_.empty() || maxPeaks <= 0) return out;
+    cv::Mat gray = toGray(frame);
+    cv::Rect roi = region & cv::Rect(0, 0, gray.cols, gray.rows);
+    if (roi.width < fsize_.width || roi.height < fsize_.height) return out;
+
+    // Tile the region with overlapping filter-sized windows; each window's peak is
+    // a candidate. Reading every strong peak (not just the best) turns the single
+    // correlation heat map into a set of target hypotheses -- two look-alike objects
+    // light up as two peaks. Then non-max suppress by proximity and keep the top K.
+    struct Cand { cv::Point2f c; float psr; };
+    std::vector<Cand> cands;
+    const float sx = std::max(1.0f, fsize_.width  * 0.5f);
+    const float sy = std::max(1.0f, fsize_.height * 0.5f);
+    for (float cy = roi.y + fsize_.height * 0.5f; cy <= roi.y + roi.height - fsize_.height * 0.5f + 1.0f; cy += sy)
+        for (float cx = roi.x + fsize_.width * 0.5f; cx <= roi.x + roi.width - fsize_.width * 0.5f + 1.0f; cx += sx) {
+            cv::Mat raw; cv::getRectSubPix(gray, fsize_, cv::Point2f(cx, cy), raw, CV_32F);
+            cv::Mat resp; cv::Point peak; float psr;
+            correlate(preprocess(raw), resp, peak, psr);
+            float ix = cx + (peak.x - fsize_.width  * 0.5f);
+            float iy = cy + (peak.y - fsize_.height * 0.5f);
+            cands.push_back({ cv::Point2f(ix, iy), psr });
+        }
+
+    std::sort(cands.begin(), cands.end(),
+              [](const Cand& a, const Cand& b) { return a.psr > b.psr; });
+    const float minDist = 0.5f * std::min(fsize_.width, fsize_.height);
+    for (const Cand& cd : cands) {
+        if (cd.psr < psrFloor) break;               // sorted desc -> nothing better left
+        bool tooClose = false;
+        for (const MatchResult& kept : out) {
+            cv::Point2f kc(kept.box.x + kept.box.width * 0.5f,
+                           kept.box.y + kept.box.height * 0.5f);
+            if (cv::norm(kc - cd.c) < minDist) { tooClose = true; break; }
+        }
+        if (tooClose) continue;
+        MatchResult mr;
+        mr.box = cv::Rect2f(cd.c.x - fsize_.width * 0.5f, cd.c.y - fsize_.height * 0.5f,
+                            (float)fsize_.width, (float)fsize_.height);
+        mr.psr = cd.psr;
+        mr.ncc = clamp01(cd.psr / 12.0f);
+        mr.valid = true;
+        out.push_back(mr);
+        if ((int)out.size() >= maxPeaks) break;
+    }
+    return out;
+}
+
 } // namespace cot

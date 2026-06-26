@@ -23,6 +23,7 @@ add_executable(tracker
   src/TemplateMatcher.cpp
   src/MosseMatcher.cpp
   src/RotationEstimator.cpp
+  src/MultiTargetTracker.cpp
   src/CvTrackerMatcher.cpp
   src/SearchRegion.cpp
   src/ConfidenceEvaluator.cpp

@@ -2,6 +2,7 @@
 #include "TemplateMatcher.hpp"
 #include "MosseMatcher.hpp"
 #include "CvTrackerMatcher.hpp"
+#include "MultiTargetTracker.hpp"
 #include "VideoSource.hpp"
 #include <cstdio>
 #include <cstdlib>
@@ -23,6 +24,7 @@ static void usage(const char* prog) {
     std::printf("  --anchor <f>      MOSSE pull-back toward frame-1 filter (default 0 = off)\n");
     std::printf("  --prior <f>       velocity-oriented motion prior (default 0 = off)\n");
     std::printf("  --no-rotation     disable the log-polar rotation-recovery stage (MOSSE)\n");
+    std::printf("  --multi           multi-target mode: keeps identities apart by motion\n");
     std::printf("  --no-adapt        freeze the template (diagnostic: isolates drift)\n");
     std::printf("  --output <path>   output video (default outputs/videos/tracked.mp4)\n");
     std::printf("  --reacq-max <f>   max search expansion when lost (default 6; lower = tighter\n");
@@ -41,6 +43,7 @@ int main(int argc, char** argv) {
     double mosseAnchor = 0.0;   // off by default (plain MOSSE was best)
     double mossePrior  = 0.0;   // off by default
     bool   mosseRotation = true;  // log-polar rotation recovery on by default
+    bool   multiTarget = false;   // multi-target data-association mode
     int cameraIndex = -1;
 
     for (int i = 1; i < argc; ++i) {
@@ -63,6 +66,7 @@ int main(int argc, char** argv) {
         }
         else if (a == "--no-adapt")                cfg.adapt = false;
         else if (a == "--no-rotation")             mosseRotation = false;
+        else if (a == "--multi")                   multiTarget = true;
         else if (a == "--output" && i + 1 < argc)  cfg.outputPath = argv[++i];
         else if (a == "--no-display")              cfg.display = false;
         else if (a == "-h" || a == "--help")     { usage(argv[0]); return 0; }
@@ -77,6 +81,11 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "error: could not open %s\n",
                      cameraIndex >= 0 ? "camera" : videoPath.c_str());
         return 2;
+    }
+
+    if (multiTarget) {
+        std::printf("matcher: mosse (multi-target)\n");
+        return runMultiTarget(source, cfg);
     }
 
     std::unique_ptr<IMatcher> matcher;
