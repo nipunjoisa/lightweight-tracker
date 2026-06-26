@@ -8,8 +8,18 @@ namespace cot {
 
 static float clamp01(float v) { return std::max(0.0f, std::min(1.0f, v)); }
 
-MosseMatcher::MosseMatcher(double sigma, int initWarps, double anchor, double priorFrac)
-    : sigma_(sigma), initWarps_(initWarps), anchor_(anchor), priorFrac_(priorFrac) {}
+MosseMatcher::MosseMatcher(double sigma, int initWarps, double anchor,
+                           double priorFrac, bool rotEnable)
+    : sigma_(sigma), initWarps_(initWarps), anchor_(anchor),
+      priorFrac_(priorFrac), rotEnable_(rotEnable) {}
+
+cv::Mat MosseMatcher::rotatePatch(const cv::Mat& p, double angleDeg) {
+    cv::Point2f c(p.cols * 0.5f, p.rows * 0.5f);
+    cv::Mat M = cv::getRotationMatrix2D(c, angleDeg, 1.0);
+    cv::Mat out;
+    cv::warpAffine(p, out, M, p.size(), cv::INTER_LINEAR, cv::BORDER_REFLECT);
+    return out;
+}
 
 cv::Mat MosseMatcher::toGray(const cv::Mat& frame) {
     if (frame.channels() == 1) return frame;
@@ -99,6 +109,7 @@ void MosseMatcher::setTemplate(const cv::Mat& frame, const cv::Rect& box) {
     // Initialize the filter from the patch plus several random warps.
     cv::Mat raw;
     cv::getRectSubPix(gray, fsize_, center, raw, CV_32F);
+    original_ = raw.clone();   // snapshot-at-init reference for rotation recovery
     H1_ = cv::Mat::zeros(G_.size(), CV_32FC2);
     H2_ = cv::Mat::zeros(G_.size(), CV_32FC2);
     cv::RNG rng(12345);
@@ -286,6 +297,36 @@ MatchResult MosseMatcher::match(const cv::Mat& frame,
     // default weights/saturation. Lower psrSaturation in Types.hpp to loosen.
     out.ncc = clamp01(bestPsr / 12.0f);
     out.valid = true;
+
+    // ---- Gated rotation recovery -----------------------------------------------
+    // Fire whenever the upright match is sub-strong (a real rotation drops PSR, so
+    // no lower bound) and we are NOT re-detecting (during a true loss the re-detector
+    // owns recovery -- letting rotation run there only fabricates a confident match
+    // on a co-located look-alike). Estimate the angle vs the frozen original, de-rotate
+    // the patch, re-correlate, and keep it ONLY if PSR improves -- so the stage can
+    // never lower confidence. Trying +/-angle absorbs the sign ambiguity for free.
+    if (rotEnable_ && !reacquiring_ && out.psr < 8.4f && !original_.empty()) {
+        cv::Size ss(std::max(4, (int)std::lround(fsize_.width  * bestScale)),
+                    std::max(4, (int)std::lround(fsize_.height * bestScale)));
+        cv::Mat raw;
+        cv::getRectSubPix(gray, ss, cv::Point2f(cx, cy), raw, CV_32F);
+        if (raw.size() != fsize_) { cv::Mat r; cv::resize(raw, r, fsize_); raw = r; }
+
+        RotationEstimator::Result rr = rot_.estimate(original_, raw);
+        if (std::abs(rr.angleDeg) >= 3.0) {
+            float improvedPsr = out.psr;
+            for (double cand : { rr.angleDeg, -rr.angleDeg }) {
+                cv::Mat resp; cv::Point pk; float psr;
+                correlate(preprocess(rotatePatch(raw, cand)), resp, pk, psr);
+                if (psr > improvedPsr) improvedPsr = psr;
+            }
+            if (improvedPsr > out.psr) {        // gate: only ever raise confidence
+                out.psr = improvedPsr;
+                out.ncc = clamp01(improvedPsr / 12.0f);
+            }
+        }
+    }
+
     return out;
 }
 

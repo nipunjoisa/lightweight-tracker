@@ -2,6 +2,7 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -69,7 +70,8 @@ bool TrackerEngine::run(VideoSource& source) {
                          cfg_.outputPath.c_str());
     }
 
-    cv::Rect2f believed = roiF;     // current best estimate of the target box
+    cv::Rect2f believed      = roiF;  // current best estimate of the target box
+    cv::Rect2f lastConfident = roiF;  // last box we actually measured (re-detect anchor)
     float expansion   = cfg_.searchExpansion;
     bool  lastWasLost = false;
 
@@ -80,37 +82,50 @@ bool TrackerEngine::run(VideoSource& source) {
         cv::Rect2f predicted = kalman_.predict();
         matcher_->setMotionHint(kalman_.velocity());  // orient the motion prior
 
-        // 2) Build the local search ROI (widened if we've been lost).
-        cv::Rect roiRect = search_.compute(predicted, expansion, frame.size());
+        // 2) Build the local search ROI. While locked we center on the prediction.
+        //    Once lost we RE-DETECT: center on the last position we actually
+        //    measured (not the coasting prediction, which marches off in the stale
+        //    direction) and let the matcher's widened tiled search scan around it.
+        const bool searching = reacq_.lostFrames() > 0;
+        matcher_->setReacquiring(searching);   // suppress rotation recovery while re-detecting
+        const cv::Rect2f searchCenter = searching ? lastConfident : predicted;
+        cv::Rect roiRect = search_.compute(searchCenter, expansion, frame.size());
 
         // 3) Multi-scale template match inside the ROI.
         cv::Size expectedSize(std::max(4, (int)std::lround(predicted.width)),
                               std::max(4, (int)std::lround(predicted.height)));
         MatchResult m = matcher_->match(frame, roiRect, expectedSize, cfg_.scales);
 
-        // 4) Fuse confidence + physics gating, then classify.
-        Evaluation ev = confidence_.evaluate(m, predicted, believed);
+        // 4) Fuse confidence + gating. While re-detecting, gate against the last
+        //    sighting and let the reachable radius grow with the time spent lost.
+        const cv::Rect2f speedRef = searching ? lastConfident : predicted;
+        const cv::Rect2f sizeRef  = searching ? lastConfident : believed;
+        const float slack = searching ? std::min(8.0f, 1.0f + (float)reacq_.lostFrames()) : 1.0f;
+        Evaluation ev = confidence_.evaluate(m, speedRef, sizeRef, slack);
 
-        // A loss with prior loss history is reported as REACQUIRING.
-        TrackStatus reported = ev.status;
-        if (ev.status == TrackStatus::LOST && lastWasLost)
-            reported = TrackStatus::REACQUIRING;
+        // 5) Accept or reject. Normal tracking accepts anything not LOST; while
+        //    re-detecting we demand a STRONG, confirmed match before re-locking, so
+        //    a weak false peak during the wide search can't hijack the track.
+        bool accept = searching ? (ev.confidence >= cfg_.reacquireConfidence)
+                                : (ev.status != TrackStatus::LOST);
 
-        // 5) Branch on confidence.
-        if (ev.status == TrackStatus::TRACKING) {
+        TrackStatus reported;
+        if (accept) {
             believed = kalman_.correct(m.box);
-            if (cfg_.adapt)
-                matcher_->updateTemplate(frame, toRect(m.box), cfg_.templateLearnRate);  // slow update
-        } else if (ev.status == TrackStatus::UNCERTAIN) {
-            believed = kalman_.correct(m.box);  // correct cautiously, do NOT touch template
+            lastConfident = m.box;                       // remember the real sighting
+            reported = (ev.confidence >= cfg_.strongThreshold) ? TrackStatus::TRACKING
+                                                               : TrackStatus::UNCERTAIN;
+            if (reported == TrackStatus::TRACKING && cfg_.adapt)
+                matcher_->updateTemplate(frame, toRect(m.box), cfg_.templateLearnRate);
         } else {
-            believed = predicted;               // LOST: coast on prediction only
+            believed = predicted;                        // coast on prediction only
             if (!lastWasLost) matcher_->useOriginalTemplate();  // revert to pristine on first loss
+            reported = lastWasLost ? TrackStatus::REACQUIRING : TrackStatus::LOST;
         }
 
         // 6) Reacquisition policy decides NEXT frame's search expansion.
         expansion   = reacq_.onStatus(reported);
-        lastWasLost = (ev.status == TrackStatus::LOST);
+        lastWasLost = !accept;
 
         // ---- timing / HUD ----
         auto t1 = std::chrono::high_resolution_clock::now();

@@ -1,5 +1,6 @@
 #pragma once
 #include "IMatcher.hpp"
+#include "RotationEstimator.hpp"
 
 namespace cot {
 
@@ -11,12 +12,14 @@ namespace cot {
 class MosseMatcher : public IMatcher {
 public:
     explicit MosseMatcher(double sigma = 2.0, int initWarps = 8,
-                          double anchor = 0.02, double priorFrac = 1.0);
+                          double anchor = 0.02, double priorFrac = 1.0,
+                          bool rotEnable = true);
 
     void setTemplate(const cv::Mat& frame, const cv::Rect& box) override;
     void updateTemplate(const cv::Mat& frame, const cv::Rect& box, float alpha) override;
     void useOriginalTemplate() override;
     void setMotionHint(const cv::Point2f& velocity) override { velocity_ = velocity; }
+    void setReacquiring(bool reacquiring) override { reacquiring_ = reacquiring; }
     MatchResult match(const cv::Mat& frame,
                       const cv::Rect& searchRegion,
                       const cv::Size& expectedSize,
@@ -29,6 +32,7 @@ private:
     static cv::Mat rndWarp(const cv::Mat& a, cv::RNG& rng);
     cv::Mat preprocess(const cv::Mat& patch32f) const;               // log + normalize + window
     void    buildPrior(const cv::Point2f& v);                        // velocity-oriented teardrop
+    static cv::Mat rotatePatch(const cv::Mat& p, double angleDeg);   // de-rotate a patch
     void    updateKernel();                                          // H_ = conj(H1_/H2_)
     void    correlate(const cv::Mat& patch32f,
                       cv::Mat& resp, cv::Point& peak, float& psr) const;
@@ -38,12 +42,16 @@ private:
     cv::Mat  G_;              // FFT of the desired gaussian response (CV_32FC2)
     cv::Mat  H1_, H2_, H_;    // running numerator, denominator, kernel (CV_32FC2)
     cv::Mat  H1_0_, H2_0_;    // pristine init, restored on reacquisition
+    cv::Mat  original_;       // snapshot-at-init gray patch (rotation reference)
     cv::Mat  prior_;          // Gaussian motion prior over the response (may be empty)
     double   sigma_;
     int      initWarps_;
     double   anchor_;         // per-update pull back toward the original filter
     double   priorFrac_;      // motion-prior width as a fraction of the half-window
     cv::Point2f velocity_{0.f, 0.f};  // latest motion hint (px/frame)
+    RotationEstimator rot_;   // log-polar rotation/scale estimator
+    bool     rotEnable_;      // gated rotation-recovery stage on/off
+    bool     reacquiring_ = false;  // supervisor is searching (target may be absent)
 };
 
 } // namespace cot

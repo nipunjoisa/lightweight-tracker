@@ -11,7 +11,8 @@ public:
 
     Evaluation evaluate(const MatchResult& m,
                         const cv::Rect2f& predicted,
-                        const cv::Rect2f& previous) const;
+                        const cv::Rect2f& previous,
+                        float speedSlack = 1.0f) const;
 
 private:
     TrackStatus classify(float confidence) const;

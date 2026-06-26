@@ -49,6 +49,7 @@ struct TrackerConfig {
     // Confidence thresholds
     float strongThreshold = 0.70f;
     float weakThreshold   = 0.45f;
+    float reacquireConfidence = 0.70f;  // strict bar to re-lock after a loss
 
     // Confidence fusion (correlation peak height vs peak sharpness)
     float nccWeight     = 0.5f;

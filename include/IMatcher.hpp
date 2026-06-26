@@ -25,6 +25,15 @@ public:
     // that use a motion prior orient it with this; others ignore it.
     virtual void setMotionHint(const cv::Point2f& velocity) { (void)velocity; }
 
+    // Optional hint: the supervisor is in re-detection/search mode (target may be
+    // absent/occluded). Backends can suppress risky recovery heuristics.
+    virtual void setReacquiring(bool reacquiring) { (void)reacquiring; }
+
+    // Optional per-frame hint: are we in re-detection (post-loss) mode? Backends
+    // can suppress appearance tricks (e.g. rotation recovery) that would otherwise
+    // manufacture confidence on a distractor during an occlusion.
+    virtual void setRedetecting(bool redetecting) { (void)redetecting; }
+
     // Search inside searchRegion (full-frame rect), trying scales around expectedSize.
     // Returned box is in FULL-FRAME coordinates.
     virtual MatchResult match(const cv::Mat& frame,

@@ -22,8 +22,12 @@ static void usage(const char* prog) {
     std::printf("  --learn <f>       online learn rate (default 0.05; MOSSE likes ~0.125)\n");
     std::printf("  --anchor <f>      MOSSE pull-back toward frame-1 filter (default 0 = off)\n");
     std::printf("  --prior <f>       velocity-oriented motion prior (default 0 = off)\n");
+    std::printf("  --no-rotation     disable the log-polar rotation-recovery stage (MOSSE)\n");
     std::printf("  --no-adapt        freeze the template (diagnostic: isolates drift)\n");
     std::printf("  --output <path>   output video (default outputs/videos/tracked.mp4)\n");
+    std::printf("  --reacq-max <f>   max search expansion when lost (default 6; lower = tighter\n");
+    std::printf("                    re-search, better for cluttered/look-alike scenes)\n");
+    std::printf("  --reacq-step <f>  search growth per lost frame (default 0.6)\n");
     std::printf("  --no-display      run headless (still writes the output video)\n");
     std::printf("  -h, --help        show this help\n");
 }
@@ -36,6 +40,7 @@ int main(int argc, char** argv) {
     std::string matcherName = "mosse";
     double mosseAnchor = 0.0;   // off by default (plain MOSSE was best)
     double mossePrior  = 0.0;   // off by default
+    bool   mosseRotation = true;  // log-polar rotation recovery on by default
     int cameraIndex = -1;
 
     for (int i = 1; i < argc; ++i) {
@@ -45,6 +50,8 @@ int main(int argc, char** argv) {
         else if (a == "--learn" && i + 1 < argc)   cfg.templateLearnRate = (float)std::atof(argv[++i]);
         else if (a == "--anchor" && i + 1 < argc)  mosseAnchor = std::atof(argv[++i]);
         else if (a == "--prior" && i + 1 < argc)   mossePrior = std::atof(argv[++i]);
+        else if (a == "--reacq-max" && i + 1 < argc)  cfg.reacqMaxExpansion  = (float)std::atof(argv[++i]);
+        else if (a == "--reacq-step" && i + 1 < argc) cfg.reacqExpansionStep = (float)std::atof(argv[++i]);
         else if (a == "--roi" && i + 1 < argc) {
             int x, y, w, h;
             if (std::sscanf(argv[++i], "%d,%d,%d,%d", &x, &y, &w, &h) == 4) {
@@ -55,6 +62,7 @@ int main(int argc, char** argv) {
             }
         }
         else if (a == "--no-adapt")                cfg.adapt = false;
+        else if (a == "--no-rotation")             mosseRotation = false;
         else if (a == "--output" && i + 1 < argc)  cfg.outputPath = argv[++i];
         else if (a == "--no-display")              cfg.display = false;
         else if (a == "-h" || a == "--help")     { usage(argv[0]); return 0; }
@@ -75,7 +83,7 @@ int main(int argc, char** argv) {
     if (matcherName == "ncc")       matcher = std::make_unique<TemplateMatcher>();
     else if (matcherName == "csrt") matcher = std::make_unique<CvTrackerMatcher>(CvTrackerMatcher::Kind::CSRT);
     else if (matcherName == "kcf")  matcher = std::make_unique<CvTrackerMatcher>(CvTrackerMatcher::Kind::KCF);
-    else                            matcher = std::make_unique<MosseMatcher>(2.0, 8, mosseAnchor, mossePrior);
+    else                            matcher = std::make_unique<MosseMatcher>(2.0, 8, mosseAnchor, mossePrior, mosseRotation);
     std::printf("matcher: %s\n", matcherName.c_str());
 
     TrackerEngine engine(cfg, std::move(matcher));

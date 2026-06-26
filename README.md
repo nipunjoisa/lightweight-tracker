@@ -8,11 +8,13 @@ You draw a box on frame 1. The tracker holds lock using Kalman prediction, a plu
 
 ## Where things stand
 
-**v1** — NCC template matcher, 4-state machine, reacquisition, metrics, video out. Works but drifts on fast maneuvers.
+**v1** — NCC template matcher, 4-state machine, reacquisition, metrics, and video output. Works on stable targets but drifts on fast maneuvers.
 
-**v2 (current)** — MOSSE adaptive correlation filter as the default backend. CSRT and KCF wired in via OpenCV behind the same `IMatcher` interface. Benchmarked against all three on real aerial footage; MOSSE wins the fast-small-target regime. The one unsolved case is a 90° turn plus smoke occlusion — that defeated every backend and every tuning combination tried.
+**v2 (current)** — MOSSE adaptive correlation filter is now the default backend, with CSRT and KCF available through `CvTrackerMatcher` behind the same `IMatcher` interface. The tracker supports manual ROI, matcher selection, online appearance adaptation, confidence-gated updates, and annotated video output. MOSSE performs best on fast small targets; the hardest failure mode remains a 90° turn plus smoke occlusion.
 
-**v3 (next)** — ground-truth IoU / center-error metrics, per-tracker benchmark table, `tracker.yaml` config parsing (the struct is already in place, just not wired to the file).
+**v2.1 (implemented)** — the runtime is working on local macOS, the CLI supports `--matcher`, `--roi`, and video export, and the codebase includes a `tracker.yaml` schema in `include/Types.hpp` even though runtime YAML parsing is not yet wired in.
+
+**v3 (next)** — add ground-truth IoU / center-error metrics, produce a per-tracker benchmark table, wire `tracker.yaml` config parsing, and consider multi-template memory for more robust reacquisition.
 
 ---
 
@@ -75,7 +77,7 @@ cmake -S . -B build -DOpenCV_DIR=$(brew --prefix opencv)/lib/cmake/opencv4
 ./build/tracker data/trial1.MP4
 
 # preset the ROI to skip the selection dialog (useful for fair A/B)
-./build/tracker data/trial1.MP4 --matcher mosse --roi 812,140,46,58
+./build/tracker data/trial2.MP4 --matcher mosse --no-rotation
 
 # compare all three backends on the same clip with the same box
 ./build/tracker data/trial1.MP4 --matcher mosse --roi 812,140,46,58 --output outputs/videos/mosse.mp4
@@ -89,7 +91,7 @@ cmake -S . -B build -DOpenCV_DIR=$(brew --prefix opencv)/lib/cmake/opencv4
 ./build/tracker --camera 0
 
 # headless (no GUI window, still writes video)
-./build/tracker data/trial1.MP4 --no-display --output outputs/videos/run.mp4
+./build/tracker data/trial2.MP4 --no-display --output outputs/videos/redetectorbike.mp4
 ```
 
 On frame 1, drag a box around the target, then press **Enter** or **Space** to confirm. Press `q` or **Esc** to stop early. Metrics print to the terminal at the end.
@@ -148,9 +150,9 @@ Nothing else changes. The engine, state machine, confidence evaluator, and visua
 ## What to look at next (v3 targets)
 
 - **Ground-truth metrics** — load a ground-truth `.txt` (MOT format) alongside the video and compute per-frame IoU and center error. The `TrackerMetrics` class already tracks frame count, lost-frame count, and runtime; extend it here.
-- **Benchmark table** — run all four matchers on all three clips in one script, collect the metrics, print a comparison table. Makes the portfolio result quantitative rather than just visual.
-- **`tracker.yaml` parsing** — `TrackerConfig` in [include/Types.hpp](include/Types.hpp) has every tunable field. Wire it to the YAML file at [configs/tracker.yaml](configs/tracker.yaml) using `cv::FileStorage` (already a dependency via OpenCV).
-- **Multi-template memory** — store the N best patches seen during TRACKING and fall back to them during reacquisition instead of always the pristine frame-1 crop.
+- **Benchmark table** — run all four matchers on all three clips in one script, collect the metrics, and print a comparison table. This will make the tracker comparisons quantitative instead of only visual.
+- **`tracker.yaml` parsing** — `TrackerConfig` in [include/Types.hpp](include/Types.hpp) already defines every tunable field. Wire it to the YAML file at [configs/tracker.yaml](configs/tracker.yaml) using `cv::FileStorage` so runtime parameters can be loaded from disk.
+- **Multi-template memory** — store the N best patches seen during TRACKING and fall back to them during reacquisition instead of relying only on the pristine frame-1 crop.
 
 ---
 
@@ -184,3 +186,5 @@ CMakeLists.txt
 ## License
 
 See [LICENSE](LICENSE).
+
+cmake --build /Users/meghlad/Downloads/lightweight_tracker/build -j 2>&1 | grep -E "error:|warning:|Built target|Error"

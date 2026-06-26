@@ -18,7 +18,8 @@ TrackStatus ConfidenceEvaluator::classify(float c) const {
 
 Evaluation ConfidenceEvaluator::evaluate(const MatchResult& m,
                                          const cv::Rect2f& predicted,
-                                         const cv::Rect2f& previous) const {
+                                         const cv::Rect2f& previous,
+                                         float speedSlack) const {
     Evaluation e;
     if (!m.valid) {
         e.confidence = 0.0f;
@@ -35,10 +36,12 @@ Evaluation ConfidenceEvaluator::evaluate(const MatchResult& m,
     // ---- Physics gating: implausible candidates must not read as confident. ----
     bool gatesPassed = true;
 
-    // Speed gate: the match shouldn't sit far from where Kalman expected it.
+    // Speed gate: the match shouldn't sit far from where it was expected. The
+    // slack widens the reachable radius while re-detecting (target may have moved
+    // for several frames since the last sighting).
     cv::Point2f dp = center(m.box) - center(predicted);
     float disp = std::sqrt(dp.x * dp.x + dp.y * dp.y);
-    if (disp > cfg_.maxSpeed) { conf *= 0.4f; gatesPassed = false; }
+    if (disp > cfg_.maxSpeed * speedSlack) { conf *= 0.4f; gatesPassed = false; }
 
     // Size gate: area shouldn't balloon or collapse in one frame.
     float prevArea = std::max(1.0f, previous.width * previous.height);
