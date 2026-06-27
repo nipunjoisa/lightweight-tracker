@@ -1,7 +1,10 @@
 #include "Visualizer.hpp"
 #include <opencv2/imgproc.hpp>
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace cot {
 

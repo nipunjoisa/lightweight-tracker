@@ -1,5 +1,6 @@
 #include "MosseMatcher.hpp"
 #include <opencv2/imgproc.hpp>
+#include <opencv2/core/utility.hpp>   // cv::parallel_for_
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -245,43 +246,58 @@ MatchResult MosseMatcher::match(const cv::Mat& frame,
     buildPrior(velocity_);  // orient the prior along the predicted velocity
 
     // Candidate eval centers. While locked the ROI is ~2x the box -> a single
-    // center (the prediction) with a full scale sweep. Once the ROI is widened
-    // for reacquisition we tile it with overlapping filter-sized windows and
-    // scan for the target, since MOSSE can't extend its search by downsampling.
-    std::vector<cv::Point2f> centers;
+    // center (the prediction) with a full scale sweep. Once the ROI is widened for
+    // reacquisition we tile it with overlapping filter-sized windows and scan, since
+    // MOSSE can't extend its search by downsampling. The windows are independent, so
+    // we correlate them in one parallel pass across CPU cores (a pure speed win).
     const bool tile = (roi.width > fsize_.width * 2.5) || (roi.height > fsize_.height * 2.5);
+
+    struct Hit { float psr = -1e9f, scale = 0.0f; cv::Point2f center; cv::Point peak; };
+    auto searchCenters = [&](const std::vector<cv::Point2f>& centers,
+                             const std::vector<float>& sweep) -> Hit {
+        if (centers.empty()) return Hit{};
+        std::vector<Hit> partial(centers.size());
+        cv::parallel_for_(cv::Range(0, (int)centers.size()), [&](const cv::Range& rng) {
+            for (int i = rng.start; i < rng.end; ++i) {
+                Hit h; h.center = centers[i];
+                for (float s : sweep) {
+                    cv::Size ss(std::max(4, (int)std::lround(fsize_.width  * s)),
+                                std::max(4, (int)std::lround(fsize_.height * s)));
+                    cv::Mat raw; cv::getRectSubPix(gray, ss, centers[i], raw, CV_32F);
+                    if (raw.size() != fsize_) { cv::Mat r; cv::resize(raw, r, fsize_); raw = r; }
+                    cv::Mat resp; cv::Point peak; float psr;
+                    correlate(preprocess(raw), resp, peak, psr);
+                    if (psr > h.psr) { h.psr = psr; h.scale = s; h.peak = peak; }
+                }
+                partial[i] = h;
+            }
+        });
+        Hit best;
+        for (const Hit& h : partial) if (h.psr > best.psr) best = h;
+        return best;
+    };
+
+    std::vector<cv::Point2f> centers;
+    std::vector<float> sweep;
     if (!tile) {
         centers.emplace_back(roi.x + roi.width * 0.5f, roi.y + roi.height * 0.5f);
+        sweep = scales;
     } else {
         float sx = std::max(1.0f, fsize_.width * 0.5f);
         float sy = std::max(1.0f, fsize_.height * 0.5f);
         for (float cy = roi.y + fsize_.height * 0.5f; cy <= roi.y + roi.height - fsize_.height * 0.5f; cy += sy)
             for (float cx = roi.x + fsize_.width * 0.5f; cx <= roi.x + roi.width - fsize_.width * 0.5f; cx += sx)
                 centers.emplace_back(cx, cy);
-        if (centers.empty())
-            centers.emplace_back(roi.x + roi.width * 0.5f, roi.y + roi.height * 0.5f);
+        if (centers.empty()) centers.emplace_back(roi.x + roi.width * 0.5f, roi.y + roi.height * 0.5f);
+        sweep = { 1.0f };
     }
-    const std::vector<float> scaleSweep = tile ? std::vector<float>{1.0f} : scales;
 
-    float bestPsr = -1e9f, bestScale = 0.0f;
-    cv::Point2f bestCenter;
-    cv::Point bestPeak;
+    Hit best = searchCenters(centers, sweep);
+    if (best.scale <= 0.0f) return out;
 
-    for (const cv::Point2f& c : centers) {
-        for (float s : scaleSweep) {
-            cv::Size ss(std::max(4, (int)std::lround(fsize_.width * s)),
-                        std::max(4, (int)std::lround(fsize_.height * s)));
-            cv::Mat raw; cv::getRectSubPix(gray, ss, c, raw, CV_32F);
-            if (raw.size() != fsize_) { cv::Mat r; cv::resize(raw, r, fsize_); raw = r; }
-
-            cv::Mat resp; cv::Point peak; float psr;
-            correlate(preprocess(raw), resp, peak, psr);
-            if (psr > bestPsr) {
-                bestPsr = psr; bestScale = s; bestCenter = c; bestPeak = peak;
-            }
-        }
-    }
-    if (bestScale <= 0.0f) return out;
+    float bestPsr = best.psr, bestScale = best.scale;
+    cv::Point2f bestCenter = best.center;
+    cv::Point bestPeak = best.peak;
 
     // Peak offset (relative to the filter center) maps back to image pixels via
     // the scale at which we sampled.
@@ -342,20 +358,28 @@ std::vector<MatchResult> MosseMatcher::detect(const cv::Mat& frame,
     // Tile the region with overlapping filter-sized windows; each window's peak is
     // a candidate. Reading every strong peak (not just the best) turns the single
     // correlation heat map into a set of target hypotheses -- two look-alike objects
-    // light up as two peaks. Then non-max suppress by proximity and keep the top K.
+    // light up as two peaks. The windows are independent, so we correlate them in
+    // parallel across CPU cores, then non-max suppress by proximity and keep top K.
     struct Cand { cv::Point2f c; float psr; };
-    std::vector<Cand> cands;
     const float sx = std::max(1.0f, fsize_.width  * 0.5f);
     const float sy = std::max(1.0f, fsize_.height * 0.5f);
+    std::vector<cv::Point2f> grid;
     for (float cy = roi.y + fsize_.height * 0.5f; cy <= roi.y + roi.height - fsize_.height * 0.5f + 1.0f; cy += sy)
-        for (float cx = roi.x + fsize_.width * 0.5f; cx <= roi.x + roi.width - fsize_.width * 0.5f + 1.0f; cx += sx) {
-            cv::Mat raw; cv::getRectSubPix(gray, fsize_, cv::Point2f(cx, cy), raw, CV_32F);
+        for (float cx = roi.x + fsize_.width * 0.5f; cx <= roi.x + roi.width - fsize_.width * 0.5f + 1.0f; cx += sx)
+            grid.emplace_back(cx, cy);
+    if (grid.empty()) return out;
+
+    std::vector<Cand> cands(grid.size());
+    cv::parallel_for_(cv::Range(0, (int)grid.size()), [&](const cv::Range& rng) {
+        for (int i = rng.start; i < rng.end; ++i) {
+            cv::Mat raw; cv::getRectSubPix(gray, fsize_, grid[i], raw, CV_32F);
             cv::Mat resp; cv::Point peak; float psr;
             correlate(preprocess(raw), resp, peak, psr);
-            float ix = cx + (peak.x - fsize_.width  * 0.5f);
-            float iy = cy + (peak.y - fsize_.height * 0.5f);
-            cands.push_back({ cv::Point2f(ix, iy), psr });
+            float ix = grid[i].x + (peak.x - fsize_.width  * 0.5f);
+            float iy = grid[i].y + (peak.y - fsize_.height * 0.5f);
+            cands[i] = { cv::Point2f(ix, iy), psr };
         }
+    });
 
     std::sort(cands.begin(), cands.end(),
               [](const Cand& a, const Cand& b) { return a.psr > b.psr; });

@@ -12,9 +12,9 @@ You draw a box on frame 1. The tracker holds lock using Kalman prediction, a plu
 
 **v2 (current)** — MOSSE adaptive correlation filter is now the default backend, with CSRT and KCF available through `CvTrackerMatcher` behind the same `IMatcher` interface. The tracker supports manual ROI, matcher selection, online appearance adaptation, confidence-gated updates, and annotated video output. MOSSE performs best on fast small targets; the hardest failure mode remains a 90° turn plus smoke occlusion.
 
-**v2.1 (implemented)** — the runtime is working on local macOS; the CLI supports `--matcher`, `--roi`, `--multi`, and video export; and the codebase includes a `tracker.yaml` schema in `include/Types.hpp` even though runtime YAML parsing is not yet wired in. A new multi-target mode shares the MOSSE appearance filter across several motion-consistent Kalman tracks so look-alike objects retain separate identities.
+**v2.1 (implemented)** — the runtime is working on local macOS; the CLI supports `--matcher`, `--roi`, `--multi`, and video export; and the codebase includes a `tracker.yaml` schema in `include/Types.hpp` even though runtime YAML parsing is not yet wired in. The project has reverted the cone/fan/360 directional search idea and restored the plain MOSSE + re-detector + Kalman baseline. The multi-target tracker remains intact, and the first orchestration step is complete: the multi-target detector now uses parallelized heat-map tiling as a pure speed optimization.
 
-**v3 (next)** — add ground-truth IoU / center-error metrics, produce a per-tracker benchmark table, wire `tracker.yaml` config parsing, and consider multi-template memory for more robust reacquisition.
+**v3 (next)** — keep the baseline as MOSSE + re-detector + Kalman for single-target, supported by the multi-target path. Next planned work is scale-aware detection for tiny targets and selective full-sweep gating for the multi-target detector, so the system only runs the expensive heat-map sweep when a track is uncertain or lost.
 
 ---
 
@@ -77,7 +77,7 @@ cmake -S . -B build -DOpenCV_DIR=$(brew --prefix opencv)/lib/cmake/opencv4
 ./build/tracker data/trial1.MP4
 
 # preset the ROI to skip the selection dialog (useful for fair A/B)
-./build/tracker data/trial2.MP4 --matcher mosse --no-rotation
+./build/tracker data/trial2.MP4 --matcher mosse --roi 10,1081,120,287 --no-rotation
 
 # compare all three backends on the same clip with the same box
 ./build/tracker data/trial1.MP4 --matcher mosse --roi 812,140,46,58 --output outputs/videos/mosse.mp4
