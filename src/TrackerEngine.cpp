@@ -30,17 +30,30 @@ bool TrackerEngine::initializeTarget(VideoSource& source, cv::Mat& firstFrame, c
     }
     cv::Rect bounds(0, 0, firstFrame.cols, firstFrame.rows);
     if (cfg_.hasInitRoi) {
-        roi = cfg_.initRoi & bounds;          // preset box -> identical init across runs
+        roi = cfg_.initRoi & bounds;
     } else {
+        float scale = std::min(900.0f / firstFrame.rows, 500.0f / firstFrame.cols);
+        if (scale > 1.0f) scale = 1.0f;
+
+        cv::Mat small;
+        cv::resize(firstFrame, small, cv::Size(), scale, scale, cv::INTER_LINEAR);
+
         const char* win = "Select target  |  drag a box, ENTER/SPACE to confirm, c to cancel";
-        roi = cv::selectROI(win, firstFrame, /*showCrosshair=*/false, /*fromCenter=*/false);
+        cv::Rect smallRoi = cv::selectROI(win, small, false, false);
         cv::destroyWindow(win);
+
+        roi = cv::Rect(
+            static_cast<int>(std::lround(smallRoi.x / scale)),
+            static_cast<int>(std::lround(smallRoi.y / scale)),
+            static_cast<int>(std::lround(smallRoi.width / scale)),
+            static_cast<int>(std::lround(smallRoi.height / scale))
+        );
+        roi &= bounds;
     }
     if (roi.width < 4 || roi.height < 4) {
         std::fprintf(stderr, "[engine] invalid/empty ROI\n");
         return false;
     }
-    // Print so the same box can be reused across matchers for a fair comparison.
     std::printf("init roi: %d,%d,%d,%d  (reuse with --roi %d,%d,%d,%d)\n",
                 roi.x, roi.y, roi.width, roi.height, roi.x, roi.y, roi.width, roi.height);
     return true;
@@ -145,11 +158,18 @@ bool TrackerEngine::run(VideoSource& source) {
 
         cv::Mat vis = viz_.draw(frame, st);
         if (writer.isOpened()) writer.write(vis);
-        if (cfg_.display) {
-            cv::imshow("cpu-object-tracker", vis);
-            int key = cv::waitKey(1);
-            if (key == 27 || key == 'q') break;  // ESC / q to quit early
-        }
+        
+	if (cfg_.display) {
+    		cv::Mat display;
+    		float scale = std::min(900.0f / vis.rows, 500.0f / vis.cols);
+   		if (scale < 1.0f)
+       			 cv::resize(vis, display, cv::Size(), scale, scale, cv::INTER_LINEAR);
+    		else
+        		display = vis;
+    		cv::imshow("cpu-object-tracker", display);
+    		int key = cv::waitKey(1);
+    		if (key == 27 || key == 'q') break;
+	}
     }
 
     metrics_.printSummary(source.fps());
