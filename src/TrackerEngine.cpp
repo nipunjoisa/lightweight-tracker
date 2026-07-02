@@ -17,11 +17,37 @@ static cv::Rect toRect(const cv::Rect2f& r) {
                     static_cast<int>(std::lround(r.height)));
 }
 
+namespace {
+constexpr float kScreenWidthFraction  = 0.90f;
+constexpr float kScreenHeightFraction = 0.85f;
+
+// Probes the OS-reported screen size via HighGUI: open a window, force it
+// fullscreen, read back the resulting rect, then tear it down. Works the
+// same way on any HighGUI backend (Win32/Qt/GTK), so no platform-specific
+// API is needed.
+cv::Size detectScreenSize() {
+    const char* probe = "cot_screen_probe";
+    cv::namedWindow(probe, cv::WINDOW_NORMAL);
+    cv::setWindowProperty(probe, cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
+    cv::Rect r = cv::getWindowImageRect(probe);
+    cv::destroyWindow(probe);
+    if (r.width <= 0 || r.height <= 0) return cv::Size(1280, 720);  // headless/backend fallback
+    return cv::Size(r.width, r.height);
+}
+} // namespace
+
 TrackerEngine::TrackerEngine(TrackerConfig cfg, std::unique_ptr<IMatcher> matcher)
     : cfg_(std::move(cfg)),
       matcher_(std::move(matcher)),
       confidence_(cfg_),
       reacq_(cfg_) {}
+
+cv::Size TrackerEngine::cachedScreenSize() {
+    if (screenSize_.width <= 0 || screenSize_.height <= 0) {
+        screenSize_ = detectScreenSize();
+    }
+    return screenSize_;
+}
 
 bool TrackerEngine::initializeTarget(VideoSource& source, cv::Mat& firstFrame, cv::Rect& roi) {
     if (!source.read(firstFrame)) {
@@ -32,7 +58,10 @@ bool TrackerEngine::initializeTarget(VideoSource& source, cv::Mat& firstFrame, c
     if (cfg_.hasInitRoi) {
         roi = cfg_.initRoi & bounds;
     } else {
-        float scale = std::min(900.0f / firstFrame.rows, 500.0f / firstFrame.cols);
+        cv::Size scr = cachedScreenSize();
+        float maxW = scr.width  * kScreenWidthFraction;
+        float maxH = scr.height * kScreenHeightFraction;
+        float scale = std::min(maxW / firstFrame.cols, maxH / firstFrame.rows);
         if (scale > 1.0f) scale = 1.0f;
 
         cv::Mat small;
@@ -158,18 +187,21 @@ bool TrackerEngine::run(VideoSource& source) {
 
         cv::Mat vis = viz_.draw(frame, st);
         if (writer.isOpened()) writer.write(vis);
-        
-	if (cfg_.display) {
-    		cv::Mat display;
-    		float scale = std::min(900.0f / vis.rows, 500.0f / vis.cols);
-   		if (scale < 1.0f)
-       			 cv::resize(vis, display, cv::Size(), scale, scale, cv::INTER_LINEAR);
-    		else
-        		display = vis;
-    		cv::imshow("cpu-object-tracker", display);
-    		int key = cv::waitKey(1);
-    		if (key == 27 || key == 'q') break;
-	}
+
+        if (cfg_.display) {
+            cv::Mat display;
+            cv::Size scr = cachedScreenSize();
+            float maxW = scr.width  * kScreenWidthFraction;
+            float maxH = scr.height * kScreenHeightFraction;
+            float scale = std::min(maxW / vis.cols, maxH / vis.rows);
+            if (scale < 1.0f)
+                cv::resize(vis, display, cv::Size(), scale, scale, cv::INTER_LINEAR);
+            else
+                display = vis;
+            cv::imshow("cpu-object-tracker", display);
+            int key = cv::waitKey(1);
+            if (key == 27 || key == 'q') break;
+        }
     }
 
     metrics_.printSummary(source.fps());

@@ -22,6 +22,7 @@ public:
 
 private:
     bool initializeTarget(VideoSource& source, cv::Mat& firstFrame, cv::Rect& roi);
+    cv::Size cachedScreenSize();
 
     TrackerConfig             cfg_;
     std::unique_ptr<IMatcher> matcher_;
@@ -31,6 +32,7 @@ private:
     ReacquisitionManager      reacq_;
     TrackerMetrics            metrics_;
     Visualizer                viz_;
+    cv::Size                  screenSize_{0, 0};  // cached, detected once on first use
 };
 
 } // namespace cot
