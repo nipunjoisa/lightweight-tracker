@@ -188,6 +188,14 @@ CMakeLists.txt
 ```
 
 ---
+## Acknowledgements
+
+This project was developed in collaboration with **Megh Lad**.
+
+The original collaborative repository is available at:
+https://github.com/Meghlad/lightweight_tracker
+
+This repository is maintained under my GitHub account to document my own contributions while preserving the complete collaborative Git history.
 
 ## License
 
