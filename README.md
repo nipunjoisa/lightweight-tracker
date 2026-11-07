@@ -14,6 +14,8 @@ You draw a box on frame 1. The tracker holds lock using Kalman prediction, a plu
 
 **v2.1 (implemented)** — the runtime is working on local macOS; the CLI supports `--matcher`, `--roi`, `--multi`, and video export; and the codebase includes a `tracker.yaml` schema in `include/Types.hpp` even though runtime YAML parsing is not yet wired in. The project has reverted the cone/fan/360 directional search idea and restored the plain MOSSE + re-detector + Kalman baseline. The multi-target tracker remains intact, and the first orchestration step is complete: the multi-target detector now uses parallelized heat-map tiling as a pure speed optimization.
 
+**v2.2** — running `./build/tracker` with no arguments now opens a native file-picker dialog (macOS via `osascript`, Linux via `zenity`) so you can choose a video from your machine, then draw the target box on frame 1.
+
 **v3 (next)** — keep the baseline as MOSSE + re-detector + Kalman for single-target, supported by the multi-target path. Next planned work is scale-aware detection for tiny targets and selective full-sweep gating for the multi-target detector, so the system only runs the expensive heat-map sweep when a track is uncertain or lost.
 
 ---
@@ -68,11 +70,19 @@ If `find_package(OpenCV)` fails on Apple Silicon:
 cmake -S . -B build -DOpenCV_DIR=$(brew --prefix opencv)/lib/cmake/opencv4
 ```
 
+### Build troubleshooting
+
+- **OpenCV 5.x** (current Homebrew default): `cv::getRotationMatrix2D` moved to `opencv2/geometry.hpp`. Either add `#include <opencv2/geometry.hpp>` to `src/MosseMatcher.cpp`, or configure with `-DCMAKE_CXX_FLAGS="-include opencv2/geometry.hpp"`. Point CMake at the right config dir: `-DOpenCV_DIR=$(brew --prefix opencv)/lib/cmake/opencv5`.
+- **macOS: "tapi error: malformed file" / compiler can't link a test program**: the Command Line Tools linker can't read the newest SDK. Build against an older installed SDK, e.g. `export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk` (see `ls /Library/Developer/CommandLineTools/SDKs`).
+
 ---
 
 ## Run
 
 ```bash
+# no arguments: opens a file picker to choose a video, then select the target on frame 1
+./build/tracker
+
 # MOSSE (default) — manual ROI selection on frame 1
 ./build/tracker data/trial1.MP4
 
@@ -182,7 +192,7 @@ include/
 
 src/                    — implementations (mirror of include/)
 configs/tracker.yaml    — config file (fields defined, parsing not yet wired)
-data/                   — test clips (trial1–3.MP4)
+data/                   — test clips (not committed; git-ignored)
 outputs/videos/         — written here by default
 CMakeLists.txt
 ```
