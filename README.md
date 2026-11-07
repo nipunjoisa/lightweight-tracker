@@ -22,10 +22,24 @@ You draw a box on frame 1. The tracker holds lock using Kalman prediction, a plu
 
 ## Architecture
 
-<a href="https://github.com/nipunjoisa/lightweight-tracker"><picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://www.gitskins.com/api/repo-diagram/image?owner=nipunjoisa&amp;repo=lightweight-tracker&amp;theme=dark&amp;v=1794032712076">
-  <img alt="Architecture diagram of nipunjoisa/lightweight-tracker" src="https://www.gitskins.com/api/repo-diagram/image?owner=nipunjoisa&amp;repo=lightweight-tracker&amp;theme=light&amp;v=1794032712076">
-</picture></a>
+```
+VideoSource
+    |
+    v
+TrackerEngine (main loop)
+    |
+    +-- KalmanBoxTracker   predict / correct
+    +-- SearchRegion       build the ROI for this frame
+    +-- IMatcher           pluggable appearance model
+    |       MosseMatcher       (MOSSE adaptive filter, default)
+    |       CvTrackerMatcher   (CSRT or KCF via cv::Tracker)
+    |       TemplateMatcher    (NCC, v1 baseline)
+    +-- ConfidenceEvaluator    fuse NCC + PSR -> [0,1] score
+    +-- ReacquisitionManager   widen ROI, restore pristine template
+    |
+    v
+Visualizer + TrackerMetrics
+```
 
 State machine: **TRACKING → UNCERTAIN → LOST → REACQUIRING → TRACKING**
 
@@ -182,6 +196,17 @@ data/                   — test clips (not committed; git-ignored)
 outputs/videos/         — written here by default
 CMakeLists.txt
 ```
+
+---
+
+## Feedback & collaboration
+
+Contributions, ideas, and feedback on future versions are welcome. This is an open project and collaboration is encouraged.
+
+- **Give feedback:** open an issue with your thoughts on the v3 targets above (scale-aware detection, selective full-sweep gating, ground-truth metrics, benchmarking) or anything else you'd like to see.
+- **Branch and build on it:** fork the repo, create a feature branch (`git checkout -b feature/your-idea`), and open a pull request. New matchers are especially easy to add; see [Adding a new matcher](#adding-a-new-matcher).
+- **Share results:** if you run the tracker on your own footage, I'd love to hear where it holds lock and where it fails.
+- **Collaborate:** if you want to work on a larger piece together, get in touch via a GitHub issue or discussion.
 
 ---
 
