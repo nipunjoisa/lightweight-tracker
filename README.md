@@ -22,24 +22,10 @@ You draw a box on frame 1. The tracker holds lock using Kalman prediction, a plu
 
 ## Architecture
 
-```
-VideoSource
-    |
-    v
-TrackerEngine (main loop)
-    |
-    +-- KalmanBoxTracker   predict / correct
-    +-- SearchRegion       build the ROI for this frame
-    +-- IMatcher           pluggable appearance model
-    |       MosseMatcher       (MOSSE adaptive filter, default)
-    |       CvTrackerMatcher   (CSRT or KCF via cv::Tracker)
-    |       TemplateMatcher    (NCC, v1 baseline)
-    +-- ConfidenceEvaluator    fuse NCC + PSR -> [0,1] score
-    +-- ReacquisitionManager   widen ROI, restore pristine template
-    |
-    v
-Visualizer + TrackerMetrics
-```
+<a href="https://github.com/nipunjoisa/lightweight-tracker"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://www.gitskins.com/api/repo-diagram/image?owner=nipunjoisa&amp;repo=lightweight-tracker&amp;theme=dark&amp;v=1794032712076">
+  <img alt="Architecture diagram of nipunjoisa/lightweight-tracker" src="https://www.gitskins.com/api/repo-diagram/image?owner=nipunjoisa&amp;repo=lightweight-tracker&amp;theme=light&amp;v=1794032712076">
+</picture></a>
 
 State machine: **TRACKING → UNCERTAIN → LOST → REACQUIRING → TRACKING**
 
@@ -198,6 +184,7 @@ CMakeLists.txt
 ```
 
 ---
+
 ## Acknowledgements
 
 This project was developed in collaboration with **Megh Lad**.
@@ -210,5 +197,3 @@ This repository is maintained under my GitHub account to document my own contrib
 ## License
 
 See [LICENSE](LICENSE).
-
-cmake --build /Users/meghlad/Downloads/lightweight_tracker/build -j 2>&1 | grep -E "error:|warning:|Built target|Error"
