@@ -24,3 +24,7 @@ cmake-build-release/
 *.a
 *.so
 *.dll
+# Python
+__pycache__/
+*.pyc
+.venv/

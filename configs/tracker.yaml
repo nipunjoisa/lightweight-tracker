@@ -1,6 +1,6 @@
 # tracker.yaml — default tracker parameters.
-# NOTE: v1 uses the defaults baked into TrackerConfig (include/Types.hpp).
-# This file documents them and is the target for the v2 YAML loader.
+# NOTE: the tracker uses the defaults baked into TrackerConfig (tracker/types.py).
+# This file documents them and is the target for a future YAML loader.
 
 confidence:
   strong_threshold: 0.70
