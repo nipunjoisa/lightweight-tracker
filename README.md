@@ -18,30 +18,18 @@ You draw a box on frame 1. The tracker holds lock using Kalman prediction, a plu
 
 **v2.3 (current)** — the whole project is now **pure Python**. The C++17/CMake implementation was ported module-for-module (same state machine, thresholds, MOSSE filter, rotation recovery, Kalman model and multi-target tracker), so there is nothing to compile. The last C++ version is preserved in git history (`git log -- src/`).
 
+**v2.2** — running `./build/tracker` with no arguments now opens a native file-picker dialog (macOS via `osascript`, Linux via `zenity`) so you can choose a video from your machine, then draw the target box on frame 1.
+
 **v3 (next)** — keep the baseline as MOSSE + re-detector + Kalman for single-target, supported by the multi-target path. Next planned work is scale-aware detection for tiny targets and selective full-sweep gating for the multi-target detector, so the system only runs the expensive heat-map sweep when a track is uncertain or lost.
 
 ---
 
 ## Architecture
 
-```
-VideoSource
-    |
-    v
-TrackerEngine (main loop)
-    |
-    +-- KalmanBoxTracker   predict / correct
-    +-- SearchRegion       build the ROI for this frame
-    +-- IMatcher           pluggable appearance model
-    |       MosseMatcher       (MOSSE adaptive filter, default)
-    |       CvTrackerMatcher   (CSRT or KCF via cv::Tracker)
-    |       TemplateMatcher    (NCC, v1 baseline)
-    +-- ConfidenceEvaluator    fuse NCC + PSR -> [0,1] score
-    +-- ReacquisitionManager   widen ROI, restore pristine template
-    |
-    v
-Visualizer + TrackerMetrics
-```
+<a href="https://github.com/nipunjoisa/lightweight-tracker"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://www.gitskins.com/api/repo-diagram/image?owner=nipunjoisa&amp;repo=lightweight-tracker&amp;theme=dark&amp;v=1794032712076">
+  <img alt="Architecture diagram of nipunjoisa/lightweight-tracker" src="https://www.gitskins.com/api/repo-diagram/image?owner=nipunjoisa&amp;repo=lightweight-tracker&amp;theme=light&amp;v=1794032712076">
+</picture></a>
 
 State machine: **TRACKING → UNCERTAIN → LOST → REACQUIRING → TRACKING**
 
@@ -61,6 +49,11 @@ pip install -r requirements.txt                       # numpy + opencv-python
 ```
 
 Works with OpenCV 4.x and 5.x. If `cv2.TrackerCSRT_create` / `cv2.TrackerKCF_create` are missing (rare on some OpenCV 4.x builds), install `opencv-contrib-python` instead.
+
+### Build troubleshooting
+
+- **OpenCV 5.x** (current Homebrew default): `cv::getRotationMatrix2D` moved to `opencv2/geometry.hpp`. Either add `#include <opencv2/geometry.hpp>` to `src/MosseMatcher.cpp`, or configure with `-DCMAKE_CXX_FLAGS="-include opencv2/geometry.hpp"`. Point CMake at the right config dir: `-DOpenCV_DIR=$(brew --prefix opencv)/lib/cmake/opencv5`.
+- **macOS: "tapi error: malformed file" / compiler can't link a test program**: the Command Line Tools linker can't read the newest SDK. Build against an older installed SDK, e.g. `export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk` (see `ls /Library/Developer/CommandLineTools/SDKs`).
 
 ---
 
